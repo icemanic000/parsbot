@@ -3,23 +3,24 @@ import logging
 import pandas as pd
 from telethon.sync import TelegramClient
 from telegram import Update, InputFile
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from aiohttp import web
+import asyncio
 
+# Налаштування логування
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Змінні середовища
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 SESSION_NAME = os.getenv("SESSION_NAME", "parsbot_session")
 
+# Telethon клієнт
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привіт! Надішли мені @username каналу або групи, і я зберу користувачів з останніх 500 повідомлень."
-    )
-
+# Обробка повідомлень
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_input = update.message.text.strip()
     if not chat_input.startswith("@"):
@@ -50,8 +51,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Помилка: {e}")
 
+# Простий вебсервер для Azure health check
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+
+async def run_web_server():
+    app = web.Application()
+    app.add_routes([web.get("/", handle_root)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8000)
+    await site.start()
+
+# Основний запуск
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+    async def main():
+        # Запускаємо HTTP-сервер паралельно з Telegram-ботом
+        asyncio.create_task(run_web_server())
+
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        await app.run_polling()
+
+    asyncio.run(main())
